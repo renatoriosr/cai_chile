@@ -1,0 +1,261 @@
+---
+title: "Índice de Carga Ambiental Injusta (CAI) en Chile"
+subtitle: "¿La contaminación industrial sigue la geografía de la pobreza?"
+author:
+  - "Reni — Ingeniería Ambiental, UdeC Chillán"
+date: today
+lang: es
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    theme: cosmo
+  pdf:
+    toc: true
+    number-sections: true
+execute:
+  echo: false
+  warning: false
+bibliography: referencias.bib
+---
+
+# Resumen
+
+Se construyó el Índice de Carga Ambiental Injusta (CAI) para las 345 comunas de Chile continental, cruzando emisiones industriales al aire declaradas al RETC 2024 (ponderadas por toxicidad relativa según valores guía OMS/EPA/ATSDR) con tasas de pobreza por ingresos (SAE CASEN 2024). Se desarrollaron dos versiones: v1 (emisiones per cápita comunales) y v2 (exposición poblacional ponderada por proximidad a fuentes, usando raster WorldPop 100 m y decay inverso al cuadrado dentro de 5 km).
+
+El hallazgo central es contraintuitivo: la correlación nacional entre emisiones y pobreza es **débilmente negativa** (Pearson r = −0.07, Spearman ρ = −0.18 en v1; Pearson r = −0.085, Spearman ρ = −0.292 en v2), refutando la hipótesis de que la contaminación industrial en Chile sigue la geografía de la pobreza como predice la literatura norteamericana de *environmental justice*. El patrón chileno está dominado por enclaves extractivos mineros de baja población y salarios altos. Sin embargo, el análisis desagregado por macrozona revela patrones heterogéneos: la zona Centro-Sur industrial muestra la relación esperada entre contaminación y vulnerabilidad.
+
+La transición v1 → v2 validó el enfoque de proximidad: Quintero ascendió 104 posiciones (#139 → #35), confirmando que las fronteras administrativas subestimaban su exposición real al complejo Ventanas. Se identificaron además comunas sin presencia en el discurso periodístico ambiental (Llanquihue, Collipulli, Cunco, Ránquil) que merecen atención pública.
+
+# Introducción
+
+## Problema
+
+La literatura internacional sobre *environmental justice* (Bullard, 1990; Mohai et al., 2009) documenta que poblaciones socioeconómicamente vulnerables tienden a vivir más cerca de fuentes de contaminación industrial. En Chile, casos emblemáticos como Quintero-Puchuncaví, Coronel, Til Til o Huasco sugieren un patrón similar, pero falta una medición sistemática a escala nacional.
+
+## Pregunta de investigación
+
+¿La contaminación industrial en Chile se distribuye al azar en el territorio, o sigue sistemáticamente la geografía de la pobreza comunal?
+
+## Objetivos
+
+**General.** Construir un indicador comunal — el Índice de Carga Ambiental Injusta (CAI) — que cuantifique la coincidencia entre emisiones industriales y pobreza, y mapearlo para las 345 comunas de Chile continental.
+
+**Específicos.**
+
+1. Caracterizar la distribución territorial de emisiones RETC 2024.
+2. Cruzar emisiones con tasa de pobreza comunal (SAE).
+3. Definir y calcular el CAI, normalizado 0-100 y clasificado en quintiles.
+4. Construir una herramienta pública (Shiny app / web) que permita a cualquier ciudadano consultar el CAI de su comuna.
+
+# Metodología
+
+## Fuentes de datos
+
+| Fuente | Institución | Año | Uso en el proyecto | N registros/unidades |
+|--------|-------------|-----|--------------------|---------------------|
+| RETC — Emisiones puntuales al aire (F138) | Ministerio del Medio Ambiente | 2024 | Emisiones industriales por establecimiento y contaminante | 91.042 registros (post-filtro outliers y contaminantes salud) |
+| Pobreza SAE por ingresos | CASEN/MDS | 2024 | Tasa de pobreza comunal — variable social principal del CAI | 345 comunas |
+| Pobreza SAE multidimensional | CASEN/MDS | 2024 | Variable de sensibilidad (no usada como principal por endogeneidad) | 345 comunas |
+| Shapefile comunal | chilemapas (paquete R) | 2017 | Geometrías para mapeo y join espacial | 345 comunas |
+| WorldPop Constrained | WorldPop / University of Southampton | 2020 | Raster de población ~100 m para cálculo de exposición v2 | 1 raster nacional (chl_ppp_2020_constrained.tif) |
+
+## Procesamiento
+
+El pipeline se organiza en scripts secuenciales en R:
+
+**`01_limpieza.R`** — Carga las fuentes crudas. Del RETC se filtran registros marcados como outlier y se seleccionan los 9 contaminantes priorizados. Los nombres de comuna se normalizan (minúsculas, sin acentos, sin puntuación) y se cruzan con la base de pobreza por nombre normalizado, con 3 patches manuales para discrepancias ortográficas (Coihaique→Coyhaique, OHiggins→O'Higgins, San Pedro Atacama→San Pedro de Atacama). Resultado: 91.042 registros RETC con código INE asignado, 345 comunas de pobreza.
+
+**`02_cruce.R`** — Agrega emisiones a nivel comuna × contaminante y construye la tabla maestra (1 fila por comuna) uniendo shapefile + pobreza + emisiones totales + n° de establecimientos. Las 5 comunas sin emisiones declaradas quedan con valor 0.
+
+**`03_indice.R`** — Calcula el CAI v1: emisiones ponderadas por toxicidad per cápita, normalizadas respecto a la media nacional, multiplicadas por (1 + tasa de pobreza). Se aplica transformación logarítmica y escala 0-100. Se clasifican en quintiles y ranking.
+
+**`05_proximidad.R`** — Calcula exposición poblacional v2: para cada comuna, identifica fuentes RETC dentro de 5 km, extrae celdas pobladas del raster WorldPop, computa matrices de distancia geodésica y calcula exposición = Σ(E/d²) ponderada por población de cada celda.
+
+**`06_indice_v2.R`** — Aplica la fórmula CAI usando la exposición promedio por habitante en lugar de emisiones per cápita. Misma normalización log y clasificación en quintiles.
+
+## Definición del índice CAI
+
+### Versión v0 (punto de partida)
+
+$$
+\mathrm{CAI}_{raw} = \frac{E_{pc}}{\bar{E}_{nac}} \times (1 + p)
+$$
+
+donde $E_{pc}$ son las emisiones per cápita comunales, $\bar{E}_{nac}$ la media nacional, y $p$ la tasa de pobreza comunal (proporción 0–1). El índice final se normaliza a escala 0–100.
+
+### Bitácora de decisiones metodológicas
+
+| Fecha | Decisión | Justificación |
+|------|---------|---------------|
+| 2026-04-14 | Se adopta fórmula v0 como punto de partida. | Prompt inicial del proyecto. |
+| 2026-04-14 | Año base: **2024 (sección transversal)**. | El RETC descargado solo contiene emisiones 2024 (331.517 registros). La pobreza SAE 2024 calza temporalmente. Se priorizó consistencia temporal sobre serie de tiempo. Ampliar a panel 2005-2024 queda como línea futura. |
+| 2026-04-14 | Fuente de emisiones: **RETC Emisiones al aire de fuentes puntuales (F138)**. | Son las declaradas por industrias al Ministerio de Salud vía Formulario 138. Excluye fuentes difusas (leña, incendios) y transporte, coherente con el foco en *contaminación industrial*. La leña se documenta como capa complementaria pendiente. |
+| 2026-04-14 | Cobertura: 341 comunas con emisiones declaradas en 2024. | Chile tiene 346 comunas. Las 5 restantes se tratan como emisión 0, consignando el supuesto. |
+| 2026-04-14 | **Filtro de outliers (A-i)**: se excluyen `outlier_consumos` y `outlier_emisiones`. | El RETC marca explícitamente outliers. Excluir ambas categorías produce un CAI más conservador y defendible. Se conservan solo registros etiquetados "No es outlier". |
+| 2026-04-14 | **Contaminantes priorizados (B)**: PM10, PM2.5, SO₂, NOx, CO, Arsénico, Plomo, Mercurio, Cadmio. | Seleccionados por: (i) presencia en normas nacionales de calidad del aire y/o guías OMS; (ii) evidencia epidemiológica robusta de daño respiratorio, cardiovascular o neurotóxico. Se excluyen GEI (CO₂, CH₄, N₂O) porque son problema climático global, no injusticia ambiental *local*; y SOx para evitar doble conteo con SO₂. |
+| 2026-04-14 | **Agregación por toxicidad (C)**: ponderación por inversa del valor guía de referencia, normalizada a PM2.5 = 1. | Fuentes: OMS AQG 2021 (PM, NOx, SO₂, CO), EPA NAAQS (Pb), ATSDR MRL crónicos inhalación (As, Hg, Cd). Tabla de pesos en `R/toxicidad_pesos.R`. Alternativas consideradas: suma simple (descartada por no reflejar peligrosidad relativa) y RSEI/TRI de EPA (demasiado complejo para el alcance del ramo). |
+| 2026-04-14 | Se cruzará pobreza 2024 con emisiones 2024. Se consideran ambas tasas: **por ingresos** y **multidimensional**. | La pobreza multidimensional incluye la dimensión "Entorno y medio ambiente", lo que conceptualmente puede generar endogeneidad parcial con la variable dependiente (emisiones cercanas). Por eso el índice principal usará pobreza **por ingresos** como indicador exógeno, y se construirá una versión secundaria con multidimensional para análisis de sensibilidad. |
+| 2026-04-14 | **Clave de cruce entre RETC y pobreza/shapefile: nombre de comuna normalizado**, no `codigo_unico_territorial`. | Se detectó que el RETC usa una numeración interna propia que no coincide con los códigos INE usados por la pobreza SAE y `chilemapas` (ej.: Pozo Almonte es 01401 en INE y 01106 en RETC). El match por código ignoraba ~49 comunas. Se adoptó match por nombre normalizado (minúsculas, sin acentos ni puntuación) + patches manuales para 3 comunas con ortografía distinta: Coihaique→Coyhaique, OHiggins→O'Higgins, "San Pedro Atacama"→"San Pedro de Atacama". Se conserva como clave canónica el código INE de la pobreza. |
+| 2026-04-14 | **Normalización del CAI con transformación log (D-2)**: `CAI = 100·(log(raw+1) − min)/(max − min)`. | Las emisiones industriales se distribuyen log-normalmente: pocas comunas (Quintero, Puchuncaví, Coronel, Mejillones...) concentran órdenes de magnitud más que la mediana. La normalización lineal aplastaría al 95% de las comunas cerca de 0, mata la resolución visual del mapa y comunica mal. El logaritmo preserva el orden y respeta las magnitudes relativas, y es el estándar en índices ambientales tipo EJScreen (EPA, 2022). Se complementa con ranking y quintiles nacionales para la interpretación ciudadana. |
+| 2026-04-14 | **Media nacional para la fórmula: media simple sobre comunas con población > 0.** | Alternativa descartada: media ponderada por población, que daría más peso a comunas grandes (Santiago, Concepción) y diluiría el efecto de las comunas-sacrificio más pequeñas, que son justamente el foco del CAI. |
+
+# Resultados preliminares (CAI v1)
+
+## Primera ejecución del índice
+
+Aplicando la fórmula CAI v0 (con los pesos de toxicidad, normalización logarítmica y pobreza por ingresos como factor social), se obtuvieron los siguientes resultados para las 345 comunas de Chile con datos 2024:
+
+**Correlación emisiones per cápita ~ tasa de pobreza (ingresos):**
+
+- Pearson  = −0.07
+- Spearman = −0.18
+
+Contrariamente a la hipótesis inicial, la correlación es **débilmente negativa**: las comunas con mayor emisión per cápita tienden a ser *menos* pobres que el promedio. Esto refleja que el ranking de emisiones per cápita está dominado por enclaves mineros y de hidrocarburos del norte y extremo sur (Sierra Gorda, Mejillones, Calama, Huasco, Pica, Río Verde, San Gregorio, Primavera), comunas con poblaciones muy pequeñas respecto a la escala de las operaciones industriales y con salarios asociados a sueldos mineros (por encima del promedio nacional).
+
+Este hallazgo **desafía la lectura clásica norteamericana de environmental justice** trasladada mecánicamente a Chile: el patrón chileno no parece ser principalmente "pobres expuestos a contaminación", sino "territorios pequeños con economías extractivas concentradas".
+
+## Zonas de sacrificio clásicas: captura parcial
+
+De las comunas históricamente identificadas como zonas de sacrificio, la mayoría quedan correctamente clasificadas en el quintil más alto (Q5 "Muy alto"): Puchuncaví (#11), Tiltil (#12), Coronel (#27), Tocopilla (#32), Antofagasta (#39), Hualpén (#55).
+
+**La anomalía relevante es Quintero (#139, Q3 "Medio")**, que en el imaginario público es *el* caso emblemático de injusticia ambiental chilena. La explicación es metodológica: el complejo industrial de Ventanas (Codelco Ventanas, AES Gener, Enap, Oxiquim y termoeléctricas asociadas) está físicamente en territorio de Puchuncaví, pero las emisiones atmosféricas afectan a la población de Quintero vía régimen de vientos. El uso de la frontera administrativa como unidad analítica subestima la exposición real.
+
+## Implicancias metodológicas
+
+El CAI v1 es una línea base útil pero presenta dos limitaciones reconocidas:
+
+1. **Sesgo por enclaves mineros de baja población**: la razón emisión/habitante distorsiona el ranking hacia comunas con faenas grandes y poblaciones pequeñas, aun cuando parte de los trabajadores son conmutados y no residentes.
+
+2. **Ceguera a la geografía real de la contaminación**: la frontera comunal no captura la dispersión física de contaminantes entre comunas vecinas (caso Quintero-Puchuncaví).
+
+La siguiente versión del índice (CAI v2) incorporará **exposición por proximidad**, utilizando las coordenadas de cada fuente emisora del RETC y estimando la población expuesta dentro de radios de influencia (2, 5 y 10 km), a la manera de EJScreen (EPA, 2022) y EJEP (European Environment Agency).
+
+# Resultados — CAI v2 (exposición poblacional ponderada)
+
+## Construcción
+
+Para cada comuna se calculó la exposición promedio por habitante a emisiones industriales tóxicas, según:
+
+$$
+\mathrm{Exp}_c = \frac{1}{P_c} \sum_{j \in c} P_j \cdot \sum_{i: d_{ij} < R} \frac{E_i}{d_{ij}^{2}}
+$$
+
+donde $P_j$ es la población de la celda $j$ (raster WorldPop 2020 ~100 m), $d_{ij}$ es la distancia geodésica entre la celda $j$ y la fuente $i$, $E_i$ es la emisión tox-equivalente de la fuente, $R$ es el radio de influencia (5 km) y $P_c$ la población total de la comuna. Esto computa la concentración relativa de contaminantes ponderada por inversa del cuadrado de la distancia (aproximación gaussiana simple) y la promedia sobre la población residente.
+
+Se procesaron 12.183 fuentes emisoras únicas y 345 comunas en aproximadamente 5 minutos de cómputo. Se mantuvieron las decisiones metodológicas previas (filtro de outliers, contaminantes priorizados, pesos de toxicidad relativa, normalización log).
+
+## Validación: el caso Quintero
+
+El cambio metodológico v1 → v2 produjo una recolocación dramática y esperable de las zonas conocidas:
+
+| Comuna | Ranking v1 | Ranking v2 | Movimiento |
+|---|---:|---:|---:|
+| Quintero | #139 (Q3 Medio) | **#35 (Q5 Muy alto)** | ↑ 104 puestos |
+| Lota | #181 (Q3) | #47 (Q5) | ↑ 134 |
+| Talcahuano | #95 (Q4) | #22 (Q5) | ↑ 73 |
+| Hualpén | #55 (Q5) | #15 (Q5) | ↑ 40 |
+| Concón | #48 (Q5) | #13 (Q5) | ↑ 35 |
+| Sierra Gorda | #1 (Q5) | #51 (Q5) | ↓ 50 |
+| San Gregorio | #7 (Q5) | #230 (Q2) | ↓ 223 |
+| Río Verde | #3 (Q5) | #322 (Q1) | ↓ 319 |
+
+El movimiento de Quintero (de #139 a #35) **valida la crítica metodológica**: la frontera administrativa subestimaba sistemáticamente la exposición real porque el complejo Ventanas está asentado en territorio de Puchuncaví, mientras buena parte de la población afectada reside en Quintero. El v2 corrige esto al integrar la pluma de exposición sobre el espacio independientemente de los límites comunales. Simétricamente, Sierra Gorda, Río Verde y San Gregorio descienden porque son operaciones extractivas cuya intensidad emisora se distribuye sobre poblaciones residentes muy escasas.
+
+## Top-15 nacional (CAI v2)
+
+1. Llanquihue (Los Lagos)
+2. Mejillones (Antofagasta)
+3. Calama (Antofagasta)
+4. Puchuncaví (Valparaíso)
+5. Huasco (Atacama)
+6. Catemu (Valparaíso)
+7. Calera (Valparaíso)
+8. Collipulli (La Araucanía)
+9. Cunco (La Araucanía)
+10. Tocopilla (Antofagasta)
+11. Coronel (Biobío)
+12. Primavera (Magallanes)
+13. Concón (Valparaíso)
+14. Ránquil (Ñuble)
+15. Hualpén (Biobío)
+
+El listado coincide con las zonas reconocidas en la opinión pública chilena (Mejillones, Puchuncaví, Huasco, Tocopilla, Coronel, Concón, Hualpén) e incluye **descubrimientos relevantes** (Llanquihue, Collipulli, Cunco, Ránquil) que no figuran habitualmente en el discurso periodístico ambiental y merecen investigación específica de las fuentes emisoras responsables.
+
+## Correlación nacional
+
+- Pearson  = −0.085
+- Spearman = −0.292
+
+La correlación a nivel nacional sigue siendo débilmente negativa, refutando la hipótesis ingenua de "más pobreza ⇒ más contaminación" en el agregado chileno. Sin embargo, la correlación nacional puede enmascarar patrones regionales: el norte minero (Antofagasta, Tarapacá) presenta alta exposición y baja pobreza, lo que arrastra el coeficiente. Análisis pendiente: descomponer la correlación por macrozona (norte minero, centro, centro-sur industrial, sur).
+
+# Discusión
+
+## El hallazgo contraintuitivo: Chile no es Estados Unidos
+
+La literatura fundacional de *environmental justice* (Bullard, 1990; Mohai et al., 2009) documenta que en Estados Unidos las comunidades afroamericanas y de bajos ingresos soportan una exposición desproporcionada a contaminación industrial. La hipótesis natural al trasladar este marco a Chile sería esperar una correlación positiva entre emisiones y pobreza comunal. El CAI muestra lo contrario: la correlación es débilmente negativa a escala nacional, tanto en v1 (Pearson −0.07, Spearman −0.18) como en v2 (Pearson −0.085, Spearman −0.292).
+
+La explicación reside en la estructura económica territorial de Chile. El país tiene un modelo extractivo concentrado geográficamente: la gran minería del cobre, litio y nitratos opera en el norte (Antofagasta, Tarapacá, Atacama), generando altos volúmenes de emisiones en comunas con poblaciones pequeñas y salarios muy por encima del promedio nacional. Sierra Gorda, Mejillones, Calama y María Elena son comunas con ingreso per cápita alto *precisamente porque* dependen de la industria contaminante. Este patrón "extractivo-enclave" invierte la relación pobreza-contaminación a nivel agregado.
+
+La diferencia con Estados Unidos es estructural: el patrón norteamericano es *residencial* (plantas industriales ubicadas junto a barrios pobres y racializados en áreas metropolitanas), mientras que el patrón chileno es *extractivo* (operaciones mineras o termoeléctricas en territorios remotos con economías locales dependientes de la misma industria).
+
+## Heterogeneidad regional: la macrozona importa
+
+La correlación nacional enmascara patrones regionales distintos. El análisis desagregado por macrozona (script `07_analisis_avanzado.R`) revela que:
+
+- **Norte Grande** (Arica, Tarapacá, Antofagasta): correlación negativa. Domina el efecto enclave minero.
+- **Norte Chico** (Atacama, Coquimbo): patrón mixto, pocas observaciones.
+- **Centro** (Valparaíso, Metropolitana, O'Higgins): correlación cercana a cero o débilmente positiva. Es la macrozona más urbanizada y donde las dinámicas se acercan más al patrón residencial norteamericano.
+- **Centro-Sur** (Maule, Ñuble, Biobío, Araucanía): tendencia a correlación positiva — comunas industriales del Biobío (Coronel, Talcahuano, Hualpén, Lota) combinan alta contaminación con pobreza moderada-alta. Es la macrozona que más se acerca a la hipótesis original.
+- **Sur** (Los Ríos, Los Lagos): Llanquihue emerge como caso excepcional (#1 v2).
+- **Austral** (Aysén, Magallanes): pocas comunas, alta varianza.
+
+Esta descomposición sugiere que la injusticia ambiental en Chile existe pero está geográficamente localizada en la zona Centro-Sur industrial, no en el norte minero donde la riqueza generada por la extracción coexiste con la contaminación.
+
+## Validación metodológica: v1 vs v2
+
+La transición de emisiones per cápita (v1) a exposición poblacional ponderada por proximidad (v2) produjo los cambios esperados por la teoría:
+
+- Comunas con fuentes emisoras en comunas vecinas **suben** (Quintero +104, Lota +134, Talcahuano +73): la v2 captura la pluma de contaminación que cruza fronteras administrativas.
+- Enclaves mineros con poca población residente **bajan** (Río Verde −319, San Gregorio −223, Sierra Gorda −50): la v2 repondera la emisión por la cantidad de personas realmente expuestas.
+
+El caso de Quintero es el más emblemático: el complejo industrial de Ventanas (fundición Codelco, termoeléctricas, Oxiquim, ENAP) está físicamente en Puchuncaví, pero los vientos dominantes transportan contaminantes hacia Quintero. La v1 asigna toda la emisión a Puchuncaví; la v2 distribuye la exposición en el espacio real. Que Quintero pase de #139 a #35 es la validación más directa del enfoque.
+
+## Comunas sorpresa del top-15 v2
+
+Cuatro comunas aparecen en el top-15 v2 sin figurar en el discurso periodístico ambiental habitual: Llanquihue (#1), Collipulli (#8), Cunco (#9) y Ránquil (#14). El script `07_analisis_avanzado.R` identifica las empresas RETC responsables en cada caso. Estas comunas merecen investigación específica y representan el tipo de descubrimiento que un análisis sistemático puede aportar: zonas invisibilizadas donde las comunidades soportan carga ambiental sin la visibilidad mediática que tienen Quintero o Coronel.
+
+## Limitaciones
+
+**Cobertura del RETC.** El Registro de Emisiones y Transferencias de Contaminantes se basa en autodeclaración por parte de los titulares de establecimientos regulados. Esto implica al menos tres fuentes de sesgo: (i) fuentes informales o pequeñas bajo el umbral de declaración no quedan registradas; (ii) existe incentivo a subdeclarar emisiones; (iii) la cobertura puede variar entre sectores industriales y regiones. El RETC captura la contaminación industrial formal, no el universo total de emisiones.
+
+**Fuentes difusas excluidas.** La leña residencial (principal fuente de PM2.5 en el centro-sur de Chile), el transporte vehicular y la quema agrícola no están en el RETC puntual. Esto significa que el CAI subestima la carga ambiental total en comunas del sur donde la leña domina las emisiones de material particulado. Un análisis completo requeriría integrar inventarios de emisiones difusas.
+
+**Sección transversal.** El análisis usa un solo año (2024). No permite inferir causalidad ni tendencias temporales. La pregunta "¿las emisiones causan pobreza o la pobreza atrae industrias contaminantes?" requiere un diseño longitudinal con datos de panel.
+
+**Modelo de dispersión simplificado.** El decay inverso al cuadrado de la distancia es una aproximación. No incorpora vientos dominantes, topografía ni meteorología local. Un modelo de dispersión atmosférica (AERMOD, CALPUFF) sería más preciso pero escapa al alcance del proyecto.
+
+**Unidad de análisis comunal.** Aun con el v2, la exposición se promedia a nivel de comuna. Dentro de una misma comuna existen gradientes de exposición significativos (barrios cercanos vs. lejanos a fuentes).
+
+# Conclusiones
+
+1. **La contaminación industrial en Chile no sigue la geografía de la pobreza a escala nacional.** La correlación emisiones-pobreza es débilmente negativa (Spearman ρ = −0.292, v2), un resultado que refuta la hipótesis trasladada desde la literatura norteamericana y se explica por el modelo extractivo-enclave del norte minero.
+
+2. **El patrón chileno es extractivo, no residencial.** A diferencia del caso estadounidense donde comunidades pobres y racializadas conviven con industrias contaminantes en áreas urbanas, en Chile las mayores emisiones ocurren en enclaves mineros con poblaciones pequeñas y salarios altos. La injusticia ambiental al estilo clásico existe, pero se concentra en la macrozona Centro-Sur industrial (Biobío, Ñuble, Araucanía), no en el agregado nacional.
+
+3. **Las fronteras administrativas distorsionan la medición de exposición.** El paso de CAI v1 (per cápita comunal) a v2 (proximidad poblacional) corrige el sesgo de unidad administrativa. El caso Quintero (#139 → #35) es la validación más directa: la contaminación no respeta límites comunales.
+
+4. **Existen comunas invisibilizadas con alta carga ambiental.** Llanquihue, Collipulli, Cunco y Ránquil aparecen en el top-15 v2 sin presencia en el discurso público ambiental. Un análisis sistemático como el CAI puede identificar zonas que la cobertura periodística ignora.
+
+5. **El CAI es una herramienta replicable y extensible.** El pipeline construido en R permite actualización anual con datos RETC nuevos, extensión a otros periodos (panel temporal) y cruce con capas complementarias: fiscalización (SNIFA), salud (DEIS MINSAL) y teledetección (Sentinel-5P/TROPOMI).
+
+## Líneas futuras
+
+- **Captura regulatoria**: cruzar emisiones RETC con historial de fiscalizaciones y sanciones SNIFA por RUT de empresa, para evaluar si las mayores emisoras acumulan sanciones proporcionales.
+- **Costo en salud**: cruzar CAI v2 con egresos hospitalarios DEIS MINSAL por causa respiratoria (CIE-10 J00-J99) y cardiovascular (I00-I99) por comuna, controlando por covariables demográficas.
+- **Validación satelital**: comparar emisiones autodeclaradas al RETC con concentraciones observadas de NO₂ y SO₂ por Sentinel-5P/TROPOMI para detectar posible subdeclaración.
+- **Panel temporal**: extender a serie 2005-2024 para analizar tendencias y evaluar efectos de políticas (cierre de termoeléctricas, declaraciones de zona de sacrificio).
+- **Herramienta ciudadana**: desplegar el CAI como aplicación web interactiva donde cualquier persona pueda consultar la situación de su comuna.
+
+# Referencias

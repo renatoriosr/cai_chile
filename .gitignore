@@ -1,0 +1,26 @@
+# === R / RStudio ===
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# === Datos (pesados / no redistribuibles) ===
+data/raw/
+data/clean/
+
+# === Archivos privados ===
+BRIEFING_AGENTE.md
+
+# === Archivos temporales ===
+.DS_Store
+Thumbs.db
+~$*
+
+# === Presentación del ramo (no es parte del repo público) ===
+outputs/CAI_presentacion.pptx
+
+# === Quarto ===
+/.quarto/
+/_site/
+*_cache/
+*_files/
