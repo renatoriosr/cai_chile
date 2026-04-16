@@ -14,9 +14,16 @@ library(plotly)
 # =========================================================================
 # Datos
 # =========================================================================
-cai_v1     <- readRDS("../data/clean/cai.rds")
-cai_v2     <- readRDS("../data/clean/cai_v2.rds")
-comunas_sf <- readRDS("../data/clean/comunas_sf.rds")
+# Rutas: "data/" local para shinyapps.io, "../data/clean/" para desarrollo local
+if (dir.exists("data")) {
+  cai_v1     <- readRDS("data/cai.rds")
+  cai_v2     <- readRDS("data/cai_v2.rds")
+  comunas_sf <- readRDS("data/comunas_sf.rds")
+} else {
+  cai_v1     <- readRDS("../data/clean/cai.rds")
+  cai_v2     <- readRDS("../data/clean/cai_v2.rds")
+  comunas_sf <- readRDS("../data/clean/comunas_sf.rds")
+}
 
 # Unir geometría con CAI v2 (principal)
 mapa_data <- comunas_sf |>

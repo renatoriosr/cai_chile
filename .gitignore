@@ -16,6 +16,10 @@ BRIEFING_AGENTE.md
 Thumbs.db
 ~$*
 
+# === Shiny deploy (datos copiados + config rsconnect) ===
+app/data/
+app/rsconnect/
+
 # === Presentación del ramo (no es parte del repo público) ===
 outputs/CAI_presentacion.pptx
 
